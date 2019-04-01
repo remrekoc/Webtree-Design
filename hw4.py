@@ -7,23 +7,6 @@ import sys
 FIELDS = ['ID','CLASS','CRN','TREE','BRANCH','COURSE_CEILING',
           'MAJOR','MAJOR2','SUBJ','NUMB','SEQ']
 
-#returns crn of (id, tree, branch)
-def findCrn(id, tree, branch, rowId, rowCrn, rowTree, rowBranch):
-    for row in range(0, len(rowCrn)):
-        if id == rowId[row] and tree == rowTree[row] and branch == rowBranch[row]:
-            return rowCrn[row]
-    return None
-
-
-#returns number of students in each class
-def classSize():
-    classSizes = {}
-    for i in range(0, len(rowCrn) ):
-        if rowCrn[i] not in classSizes:
-            classSizes.append(rowCrn[i])
-        classSizes[rowCrn[i]]+=students[(rowId[i], rowTree[i], rowBranch[i])]
-    return classSizes
-
 def read_file(filename):
     with open(filename, 'r') as csvfile:
         reader = csv.DictReader(csvfile, fieldnames=FIELDS)
@@ -49,18 +32,19 @@ def read_file(filename):
                 if id not in requests:
                     requests[id] = {}
                     if class_year == 'SENI':
-                        yearPen[id] = 6
-                    elif class_year == 'JUNI':
-                        yearPen[id] = 5
-                    elif class_year == 'SOPH':
-                        yearPen[id] = 4
-                    else:
                         yearPen[id] = 3
+                    elif class_year == 'JUNI':
+                        yearPen[id] = 4
+                    elif class_year == 'SOPH':
+                        yearPen[id] = 5
+                    else:
+                        yearPen[id] = 6
 
                 #NO REPEATS
                 if crn not in requests[id]:
                     requests[id][crn] = (tree,branch)
-                elif (tree*branch < requests[id][crn][0]*requests[id][crn][1]):
+                elif ((1 + 4-tree)*(1 + 7-branch) <
+                    (1 + 4-requests[id][crn][0])*(1 + 4-requests[id][crn][1])):
                     requests[id][crn] = (tree,branch)
 
                 if crn not in courseCeilings:
@@ -92,36 +76,35 @@ def main():
     for id in requests.keys():
         studentAssign[id] = []
         for crn in requests[id].keys():
-            studentAssign[id].append((crn, requests[id][0] * requests[id][1],
-                model.NewBoolVar('student_id%itree%ibranch%i' % (id, tree, branch))))
+            studentAssign[id].append((crn,
+                (1 + 4-requests[id][crn][0])*(1 + 4-requests[id][crn][1]),
+                model.NewBoolVar('studentAssign%iid%icrn' % (id, crn))))
 
     #CONSTRAINTS
         #1. students can have 2-4 classes
     for id in studentAssign.keys():
-        model.Add(sum(studentAssign[id][2] <=4))
-        if (studentAssign[id].size() > 2):
-            model.Add(sum(studentAssign[id][2] >=2))
+        model.Add(sum(studentAssign[id][tup][2]
+                for tup in range(0, len(studentAssign[id])) ) <=4)
+        if (len(studentAssign[id]) > 2):
+            model.Add(sum(studentAssign[id][tup][2]
+                for tup in range(0, len(studentAssign[id])) ) >=2)
         else:
-            model.Add(sum(studentAssign[id][2] >=1))
+            model.Add(sum(studentAssign[id][tup][2]
+                for tup in range(0, len(studentAssign[id])) ) >=1)
 
         #2. class size cannot be bigger than the ceiling
     classSizes = {}
     for id in studentAssign.keys():
-        for tup in studentAssign[id].keys():
-            if tup[0] not in classSizes:
-                classSizes[tup[0]] = 0
-            classSizes[tup[0]] += studentAssign[id][2]
-            model.Add(classSizes[tup[0]] <= courseCeilings[tup[0]])
+        for tup in range(0, len(studentAssign[id])):
+            crn = studentAssign[id][tup][0]
+            if crn not in classSizes:
+                classSizes[crn] = 0
+            classSizes[crn] += studentAssign[id][tup][2]
+            model.Add(classSizes[crn] <= courseCeilings[crn])
 
     #THE OBJECTIVE FUNCTION
-        #penalty ideas:
-            #scale penalty by reverse year -> penalty of sr = 2*fr
-                #fr = 1, soph = 1.33, jun = 1.66, sen = 2
-            #penalize having less than 4 classes
-                #for each class under 4, add 25
-    model.Minimize(
-    sum(yearPen[id] * (studentAssign[id][1] * studentAssign[id][2])
-        for id in studentAssign.keys()))
+    model.Maximize(sum(yearPen[id] * studentAssign[id][tup][2]
+        for id in studentAssign.keys() for tup in range(0, len(studentAssign[id]))))
 
     # Creates the solver and solve.
     solver = cp_model.CpSolver()
@@ -142,24 +125,26 @@ def main():
     else:
         print('help')
 
+    # Statistics.
+    print()
+    print('Statistics')
+    print('  - Happiness = %i' % solver.ObjectiveValue())
+    print('  - wall time       : %f s' % solver.WallTime())
 
-    # # Statistics.
-    # print()
-    # print('Statistics')
-    # print('  - Unhappiness = %i' % solver.ObjectiveValue())
-    # print('  - wall time       : %f s' % solver.WallTime())
-    #
-    # for id in student_requests.keys():
+    # for id in studentAssign.keys():
     #     print()
     #     print('ID: %d' % id)
-    #     for tree in trees.keys():
-    #         for branch in trees[tree]:
-    #             if solver.Value(students[(id, tree, branch)]):
-    #                 print('(%d, %d) -> %d' % (tree, branch, findCrn(id, tree, branch, rowId, rowCrn, rowTree, rowBranch)))
+    #     for tup in range(0, len(studentAssign[id])):
+    #         crn = studentAssign[id][tup][0]
+    #         if solver.Value(studentAssign[id][tup][2]):
+    #             print('(%d, %d) -> %d' % (requests[id][crn][0], requests[id][crn][1],
+    #                 crn))
+
+    #How to find num illegal trees?
+
 
 #can make illegal trees -> quantify how many illegal trees <- for paper
 #for project find flaws, find way to quantify
-    #how many repeat classes people get
 
 if __name__ == '__main__':
     main()
