@@ -26,26 +26,30 @@ def read_file(filename):
         students_by_class = {'SENI': set([]), 'JUNI': set([]),
                              'SOPH': set([]), 'FRST': set([]),
                              'OTHER': set([])}
+        id_to_class = {}
         courses = {}
-        reader.next() # consume the first line, which is just column headers
-
+        #reader.next() # consume the first line, which is just column headers
+        skip = True
         for row in reader:
-            id = int(row['ID'])
-            class_year = row['CLASS']
-            crn = int(row['CRN'])
-            tree = int(row['TREE'])
-            branch = int(row['BRANCH'])
-            if id in student_requests: # does this student already exist?
-                student_requests[id].add_request(crn, tree, branch)
-            else: # nope, create a new record
-                s = Student(id, class_year)
-                s.add_request(crn, tree, branch)
-                student_requests[id] = s
+            if skip == True:
+                skip = False
+            else:
+                id = int(row['ID'])
+                class_year = row['CLASS']
+                crn = int(row['CRN'])
+                tree = int(row['TREE'])
+                branch = int(row['BRANCH'])
+                if id in student_requests: # does this student already exist?
+                    student_requests[id].add_request(crn, tree, branch)
+                else: # nope, create a new record
+                    s = Student(id, class_year)
+                    s.add_request(crn, tree, branch)
+                    student_requests[id] = s
+                id_to_class[id] = class_year
+                students_by_class[class_year].add(id)
+                courses[crn] = int(row['COURSE_CEILING'])
 
-            students_by_class[class_year].add(id)
-            courses[crn] = int(row['COURSE_CEILING'])
-
-    return student_requests, students_by_class, courses
+    return student_requests, students_by_class, courses, id_to_class
 
 
 def assign_random_numbers(students_by_class):
@@ -163,7 +167,7 @@ def main():
         return
 
     # Read in data
-    student_requests, students_by_class, courses = read_file(sys.argv[1])
+    student_requests, students_by_class, courses, id_to_class = read_file(sys.argv[1])
 
     # Assign random numbers
     random_ordering = assign_random_numbers(students_by_class)
@@ -173,12 +177,23 @@ def main():
                               courses, random_ordering)
 
     # Print results to stdout
-    for id in assignments:
-        print id,
-        for course in assignments[id]:
-            print course,
-        print
+    year_to_scale = {'SENI': 6, 'JUNI': 5, 'SOPH': 4, 'FRST': 3,'OTHER': 3}
+    happiness = 0
+    for id in student_requests:
+        year = id_to_class[id]
+        for course in range(len(student_requests[id].recieved)):
+            t = student_requests[id].recieved[course][0]
+            b = student_requests[id].recieved[course][1]
+            happiness += year_to_scale[year] * ((5-t) * (8-b))
+    print(happiness)
+
+    # for id in assignments:
+    #     print id,
+    #     for course in assignments[id]:
+    #         print course,
+    #     print
 
 
 if __name__ == "__main__":
-    main()
+    for i in range(10):
+        main()

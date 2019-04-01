@@ -21,6 +21,7 @@ class Student:
         self.class_year = class_year
         self._next_course = (1, 1)
         self.requests = {}
+        self.recieved = []
 
     def __str__(self):
         """Returns a printable representation of this student record.
@@ -80,8 +81,9 @@ class Student:
 
         if (tree == 0) or (branch == 0):
             raise Exception("This should never happen!")
-        
+
         if got_last_class: # stay along same path if possible
+            self.recieved.append((tree, branch))
             if (tree <= 3) and (branch <= 3):
                 self._next_course = (tree, branch*2)
             elif (tree <= 3): # time to move to fill-in tree (#4)
@@ -121,7 +123,7 @@ class Student:
         """
         tree = self._next_course[0]
         branch = self._next_course[1]
-        
+
         if (tree == 0) or (branch == 0):
             raise Exception("This should never happen!")
 
@@ -133,9 +135,3 @@ class Student:
             self._next_course = (tree + 1, 1)
         else: # next node in current tree in level order
             self._next_course = (tree, branch + 1)
-                
-                
-            
-                
-            
-    

@@ -6,18 +6,20 @@ import sys
 
 FIELDS = ['ID','CLASS','CRN','TREE','BRANCH','COURSE_CEILING',
           'MAJOR','MAJOR2','SUBJ','NUMB','SEQ']
+treeConvert = {1:4, 2:3, 3:2, 4:1}
+branchConvert= {1:7, 2:6, 3:5, 4:4, 5:3, 6:2, 7:1}
+year_to_scale = {'SENI': 6, 'JUNI': 5, 'SOPH': 4, 'FRST': 3, 'OTHER': 3}
 
 def read_file(filename):
     with open(filename, 'r') as csvfile:
         reader = csv.DictReader(csvfile, fieldnames=FIELDS)
 
         requests = {}
-        yearPen = {}
+        yearScale = {}
         courseCeilings = {}
 
         #reader.next() # consume the first line, which is just column headers
         skip = True
-        i = 0
         for row in reader:
             if skip == True:
                 skip = False
@@ -31,27 +33,19 @@ def read_file(filename):
                 #unique students
                 if id not in requests:
                     requests[id] = {}
-                    if class_year == 'SENI':
-                        yearPen[id] = 3
-                    elif class_year == 'JUNI':
-                        yearPen[id] = 4
-                    elif class_year == 'SOPH':
-                        yearPen[id] = 5
-                    else:
-                        yearPen[id] = 6
+                    yearScale[id] = year_to_scale[class_year]
 
                 #NO REPEATS
-                if crn not in requests[id]:
+                score = (1 + 4-tree) * (1 + 7-branch)
+                if crn not in requests[id].keys():
                     requests[id][crn] = (tree,branch)
-                elif ((1 + 4-tree)*(1 + 7-branch) <
-                    (1 + 4-requests[id][crn][0])*(1 + 4-requests[id][crn][1])):
+                elif (score > (5-requests[id][crn][0])*(8-requests[id][crn][1])):
                     requests[id][crn] = (tree,branch)
 
                 if crn not in courseCeilings:
                     courseCeilings[crn] = int(row['COURSE_CEILING'])
 
-                i+=1
-    return  requests, courseCeilings, yearPen
+    return  requests, courseCeilings, yearScale
 
 def main():
 
@@ -67,7 +61,7 @@ def main():
         print()
         return
 
-    requests, courseCeilings, yearPen = read_file(sys.argv[1])
+    requests, courseCeilings, yearScale = read_file(sys.argv[1])
     num_classes = {}
     model = cp_model.CpModel()
 
@@ -77,7 +71,7 @@ def main():
         studentAssign[id] = []
         for crn in requests[id].keys():
             studentAssign[id].append((crn,
-                (1 + 4-requests[id][crn][0])*(1 + 4-requests[id][crn][1]),
+                (5-requests[id][crn][0])*(8-requests[id][crn][1]),
                 model.NewBoolVar('studentAssign%iid%icrn' % (id, crn))))
 
     #CONSTRAINTS
@@ -103,8 +97,9 @@ def main():
             model.Add(classSizes[crn] <= courseCeilings[crn])
 
     #THE OBJECTIVE FUNCTION
-    model.Maximize(sum(yearPen[id] * studentAssign[id][tup][2]
-        for id in studentAssign.keys() for tup in range(0, len(studentAssign[id]))))
+    model.Maximize(sum(yearScale[id] * studentAssign[id][t][1] * studentAssign[id][t][2]
+        for id in studentAssign.keys()
+        for t in range(0, len(studentAssign[id])) ))
 
     # Creates the solver and solve.
     solver = cp_model.CpSolver()
@@ -137,8 +132,9 @@ def main():
     #     for tup in range(0, len(studentAssign[id])):
     #         crn = studentAssign[id][tup][0]
     #         if solver.Value(studentAssign[id][tup][2]):
-    #             print('(%d, %d) -> %d' % (requests[id][crn][0], requests[id][crn][1],
-    #                 crn))
+    #             score = studentAssign[id][tup][1]
+    #             tup = ''.join(str(requests[id][crn]))
+    #             print(tup + ' -> ' + str(score))
 
     #How to find num illegal trees?
 
