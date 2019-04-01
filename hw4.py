@@ -29,6 +29,7 @@ def read_file(filename):
         reader = csv.DictReader(csvfile, fieldnames=FIELDS)
 
         student_requests = {}
+        yearPen = {}
         courseCeilings = {}
         rowId = {}
         rowTree = {}
@@ -51,6 +52,14 @@ def read_file(filename):
                 #unique students
                 if id not in student_requests:
                     student_requests[id] = {}
+                    if class_year == 'SENI':
+                        yearPen[id] = 6
+                    elif class_year == 'JUNI':
+                        yearPen[id] = 5
+                    elif class_year == 'SOPH':
+                        yearPen[id] = 4
+                    else:
+                        yearPen[id] = 3
 
                 student_requests[id][tree, branch] = crn
 
@@ -63,7 +72,7 @@ def read_file(filename):
                 rowBranch[i] = branch
                 rowCrn[i] = int(row['CRN'])
                 i+=1
-    return  student_requests, courseCeilings, rowId, rowTree, rowBranch, rowCrn
+    return  student_requests, courseCeilings, rowId, rowTree, rowBranch, rowCrn, yearPen
 
 def main():
 
@@ -79,7 +88,8 @@ def main():
         print()
         return
 
-    student_requests, courseCeilings, rowId, rowTree, rowBranch, rowCrn = read_file(sys.argv[1])
+    student_requests, courseCeilings, rowId, rowTree, rowBranch, rowCrn, yearPen = read_file(sys.argv[1])
+    num_classes = {}
     model = cp_model.CpModel()
 
     #the tree structure, helpful when assigning random variables
@@ -87,6 +97,7 @@ def main():
     trees={1:range(1,8), 2:range(1,8), 3:range(1,8), 4:range(1,5)}
 
     #VARIABLES
+        #change? could do id -> [(bool, crn, unhappy value), ...]
     students = {}
     for id in student_requests.keys():
         for tree in trees.keys():
@@ -100,46 +111,67 @@ def main():
         model.Add(sum(students[(id, tree, branch)] for tree in trees.keys() for branch in trees[tree]) >=2)
 
         #2. cannot be assigned to a branch with no classes in it
-    for id in student_requests.keys():
-        for tree in trees.keys():
-            for branch in trees[tree]:
-                if (tree, branch) not in student_requests[id]:
-                    model.Add(students[(id, tree, branch)] == 0)
+    # for id in student_requests.keys():
+    #     for tree in trees.keys():
+    #         for branch in trees[tree]:
+    #             if (tree, branch) not in student_requests[id]:
+    #                 model.Add(students[(id, tree, branch)] == 0)
 
         #3. class size cannot be bigger than the ceiling
-        classSizes = {}
-        for i in range(0, len(rowCrn) ):
-            if rowCrn[i] not in classSizes:
-                classSizes[rowCrn[i]] = 0
-            classSizes[rowCrn[i]]+=students[(rowId[i], rowTree[i], rowBranch[i])]
-            model.Add(classSizes[rowCrn[i]] <= courseCeilings[rowCrn[i]])
+    classSizes = {}
+    for i in range(0, len(rowCrn) ):
+        if rowCrn[i] not in classSizes:
+            classSizes[rowCrn[i]] = 0
+        classSizes[rowCrn[i]]+=students[(rowId[i], rowTree[i], rowBranch[i])]
+        model.Add(classSizes[rowCrn[i]] <= courseCeilings[rowCrn[i]])
 
         #4. Cannot have repeats
+            #check if repeats in trees, delete worse copies
 
 
     #THE OBJECTIVE FUNCTION
-        #penalty ideas: scale penalty by reverse year -> penalty of sr = 4*fr
+        #penalty ideas:
+            #scale penalty by reverse year -> penalty of sr = 2*fr
+                #fr = 1, soph = 1.33, jun = 1.66, sen = 2
+            #penalize having less than 4 classes
+                #for each class under 4, add 25
     model.Minimize(
-    sum(tree * branch * students[(id, tree, branch)] for id in student_requests.keys()
+    sum(yearPen[id] * (tree * branch * students[(id, tree, branch)]) for id in student_requests.keys()
         for tree in trees for branch in trees[tree]))
 
     # Creates the solver and solve.
     solver = cp_model.CpSolver()
-    solver.Solve(model)
+    status = solver.Solve(model)
 
-    # Statistics.
-    print()
-    print('Statistics')
-    print('  - Unhappiness = %i' % solver.ObjectiveValue())
-    print('  - wall time       : %f s' % solver.WallTime())
+    if status == cp_model.FEASIBLE:
+        print('feasible')
 
-    for id in student_requests.keys():
-        print()
-        print('ID: %d' % id)
-        for tree in trees.keys():
-            for branch in trees[tree]:
-                if solver.Value(students[(id, tree, branch)]):
-                    print('(%d, %d) -> %d' % (tree, branch, findCrn(id, tree, branch, rowId, rowCrn, rowTree, rowBranch)))
+    elif status == cp_model.OPTIMAL:
+        print('optimal')
+
+    elif status == cp_model.INFEASIBLE:
+        print('infeasible')
+
+    elif status == cp_model.UNKNOWN:
+        print('unknown')
+
+    else:
+        print('help')
+
+
+    # # Statistics.
+    # print()
+    # print('Statistics')
+    # print('  - Unhappiness = %i' % solver.ObjectiveValue())
+    # print('  - wall time       : %f s' % solver.WallTime())
+    #
+    # for id in student_requests.keys():
+    #     print()
+    #     print('ID: %d' % id)
+    #     for tree in trees.keys():
+    #         for branch in trees[tree]:
+    #             if solver.Value(students[(id, tree, branch)]):
+    #                 print('(%d, %d) -> %d' % (tree, branch, findCrn(id, tree, branch, rowId, rowCrn, rowTree, rowBranch)))
 
 #can make illegal trees -> quantify how many illegal trees <- for paper
 #for project find flaws, find way to quantify
