@@ -28,13 +28,9 @@ def read_file(filename):
     with open(filename, 'r') as csvfile:
         reader = csv.DictReader(csvfile, fieldnames=FIELDS)
 
-        student_requests = {}
+        requests = {}
         yearPen = {}
         courseCeilings = {}
-        rowId = {}
-        rowTree = {}
-        rowBranch = {}
-        rowCrn = {}
 
         #reader.next() # consume the first line, which is just column headers
         skip = True
@@ -50,8 +46,8 @@ def read_file(filename):
                 branch = int(row['BRANCH'])
 
                 #unique students
-                if id not in student_requests:
-                    student_requests[id] = {}
+                if id not in requests:
+                    requests[id] = {}
                     if class_year == 'SENI':
                         yearPen[id] = 6
                     elif class_year == 'JUNI':
@@ -61,18 +57,17 @@ def read_file(filename):
                     else:
                         yearPen[id] = 3
 
-                student_requests[id][tree, branch] = crn
+                #NO REPEATS
+                if crn not in requests[id]:
+                    requests[id][crn] = (tree,branch)
+                elif (tree*branch < requests[id][crn][0]*requests[id][crn][1]):
+                    requests[id][crn] = (tree,branch)
 
-                courseCeilings[crn] = int(row['COURSE_CEILING'])
+                if crn not in courseCeilings:
+                    courseCeilings[crn] = int(row['COURSE_CEILING'])
 
-                #the data based on the row number given on the excel sheet
-                #(helpful for crn-(id,tree,branch) conversion
-                rowId[i]=id
-                rowTree[i] = tree
-                rowBranch[i] = branch
-                rowCrn[i] = int(row['CRN'])
                 i+=1
-    return  student_requests, courseCeilings, rowId, rowTree, rowBranch, rowCrn, yearPen
+    return  requests, courseCeilings, yearPen
 
 def main():
 
@@ -88,46 +83,35 @@ def main():
         print()
         return
 
-    student_requests, courseCeilings, rowId, rowTree, rowBranch, rowCrn, yearPen = read_file(sys.argv[1])
+    requests, courseCeilings, yearPen = read_file(sys.argv[1])
     num_classes = {}
     model = cp_model.CpModel()
 
-    #the tree structure, helpful when assigning random variables
-    #so that you don't add to tree 4 branch 7
-    trees={1:range(1,8), 2:range(1,8), 3:range(1,8), 4:range(1,5)}
-
     #VARIABLES
-        #change? could do id -> [(bool, crn, unhappy value), ...]
-    students = {}
-    for id in student_requests.keys():
-        for tree in trees.keys():
-            for branch in trees[tree]:
-                students[(id, tree, branch)] = model.NewBoolVar('student_id%itree%ibranch%i' % (id, tree, branch))
+    studentAssign = {}
+    for id in requests.keys():
+        studentAssign[id] = []
+        for crn in requests[id].keys():
+            studentAssign[id].append((crn, requests[id][0] * requests[id][1],
+                model.NewBoolVar('student_id%itree%ibranch%i' % (id, tree, branch))))
 
     #CONSTRAINTS
         #1. students can have 2-4 classes
-    for id in student_requests.keys():
-        model.Add(sum(students[(id, tree, branch)] for tree in trees.keys() for branch in trees[tree]) <=4)
-        model.Add(sum(students[(id, tree, branch)] for tree in trees.keys() for branch in trees[tree]) >=2)
+    for id in studentAssign.keys():
+        model.Add(sum(studentAssign[id][2] <=4))
+        if (studentAssign[id].size() > 2):
+            model.Add(sum(studentAssign[id][2] >=2))
+        else:
+            model.Add(sum(studentAssign[id][2] >=1))
 
-        #2. cannot be assigned to a branch with no classes in it
-    # for id in student_requests.keys():
-    #     for tree in trees.keys():
-    #         for branch in trees[tree]:
-    #             if (tree, branch) not in student_requests[id]:
-    #                 model.Add(students[(id, tree, branch)] == 0)
-
-        #3. class size cannot be bigger than the ceiling
+        #2. class size cannot be bigger than the ceiling
     classSizes = {}
-    for i in range(0, len(rowCrn) ):
-        if rowCrn[i] not in classSizes:
-            classSizes[rowCrn[i]] = 0
-        classSizes[rowCrn[i]]+=students[(rowId[i], rowTree[i], rowBranch[i])]
-        model.Add(classSizes[rowCrn[i]] <= courseCeilings[rowCrn[i]])
-
-        #4. Cannot have repeats
-            #check if repeats in trees, delete worse copies
-
+    for id in studentAssign.keys():
+        for tup in studentAssign[id].keys():
+            if tup[0] not in classSizes:
+                classSizes[tup[0]] = 0
+            classSizes[tup[0]] += studentAssign[id][2]
+            model.Add(classSizes[tup[0]] <= courseCeilings[tup[0]])
 
     #THE OBJECTIVE FUNCTION
         #penalty ideas:
@@ -136,8 +120,8 @@ def main():
             #penalize having less than 4 classes
                 #for each class under 4, add 25
     model.Minimize(
-    sum(yearPen[id] * (tree * branch * students[(id, tree, branch)]) for id in student_requests.keys()
-        for tree in trees for branch in trees[tree]))
+    sum(yearPen[id] * (studentAssign[id][1] * studentAssign[id][2])
+        for id in studentAssign.keys()))
 
     # Creates the solver and solve.
     solver = cp_model.CpSolver()
